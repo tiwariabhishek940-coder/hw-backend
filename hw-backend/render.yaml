@@ -1,0 +1,82 @@
+services:
+  - type: web
+    name: hw-shop-india-api
+    runtime: node
+    region: singapore           # closest to India
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 4000
+
+      - key: CLIENT_URL
+        sync: false             # fill in Render dashboard → your Netlify URL
+
+      - key: DATABASE_URL
+        sync: false             # paste from Neon
+
+      - key: REDIS_URL
+        sync: false             # paste from Upstash
+
+      - key: ACCESS_TOKEN_SECRET
+        generateValue: true     # Render auto-generates a secure random value
+
+      - key: REFRESH_TOKEN_SECRET
+        generateValue: true
+
+      - key: ACCESS_TOKEN_EXPIRY
+        value: 15m
+
+      - key: REFRESH_TOKEN_EXPIRY
+        value: 7d
+
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+
+      - key: CLOUDINARY_API_KEY
+        sync: false
+
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      - key: CLOUDINARY_UPLOAD_PRESET
+        value: hw_listings
+
+      - key: RAZORPAY_KEY_ID
+        sync: false
+
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+
+      - key: TWILIO_VERIFY_SID
+        sync: false
+
+      - key: SMTP_USER
+        sync: false
+
+      - key: SMTP_PASS
+        sync: false
+
+      - key: SMTP_FROM
+        value: Hot Wheels Shop India <noreply@hotwheelsshopindia.in>
+
+      - key: SHIPROCKET_EMAIL
+        sync: false
+
+      - key: SHIPROCKET_PASSWORD
+        sync: false
