@@ -49,11 +49,13 @@ reviewRouter.post('/', authenticate,
 module.exports.reviewRouter = reviewRouter;
 
 // ── ADMIN ROUTES ──────────────────────────────────────────────────────
+const listingCtrl = require('../controllers/listingController');
 const adminRouter = express.Router();
 adminRouter.use(authenticate, requireRole('admin'));
 adminRouter.get('/dashboard',                  userCtrl.adminDashboard);
 adminRouter.get('/listings',                   userCtrl.adminGetListings);
 adminRouter.patch('/listings/:id/moderate',    userCtrl.adminModerateListing);
+adminRouter.patch('/listings/:id/feature',     listingCtrl.featureListing);
 adminRouter.get('/users',                      userCtrl.adminGetUsers);
 adminRouter.patch('/users/:id/seller-badge',   userCtrl.adminToggleSeller);
 module.exports.adminRouter = adminRouter;

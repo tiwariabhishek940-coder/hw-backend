@@ -3,11 +3,8 @@ const redis      = require('../config/redis');
 const { deleteImage } = require('../config/cloudinary');
 const { ok, created, notFound, forbidden, serverError } = require('../utils/response');
 
-const CACHE_TTL = 300; // 5 min
-
-// ── helpers ──────────────────────────────────────────────────────────
+const CACHE_TTL = 300;
 const cacheKey = (params) => `listings:${JSON.stringify(params)}`;
-
 const invalidateListingCache = async () => {
   const keys = await redis.keys('listings:*');
   if (keys.length) await redis.del(...keys);
@@ -16,29 +13,31 @@ const invalidateListingCache = async () => {
 // ── GET /listings ────────────────────────────────────────────────────
 exports.getListings = async (req, res) => {
   try {
-    const {
-      series, rarity, condition, minPrice, maxPrice,
-      q, sort = 'newest', page = 1, limit = 20,
-    } = req.query;
+    const { series, rarity, condition, minPrice, maxPrice, q, featured,
+            sort = 'newest', page = 1, limit = 20 } = req.query;
 
     const ck = cacheKey(req.query);
     const cached = await redis.get(ck);
     if (cached) return ok(res, JSON.parse(cached));
 
     const conditions = ["l.status = 'active'"];
-    const values     = [];
-    let   i          = 1;
+    const values = [];
+    let i = 1;
 
-    if (series)    { conditions.push(`l.series = $${i++}`);          values.push(series); }
-    if (rarity)    { conditions.push(`l.rarity = $${i++}`);          values.push(rarity); }
-    if (condition) { conditions.push(`l.condition = $${i++}`);       values.push(condition); }
-    if (minPrice)  { conditions.push(`l.price >= $${i++}`);          values.push(Number(minPrice)); }
-    if (maxPrice)  { conditions.push(`l.price <= $${i++}`);          values.push(Number(maxPrice)); }
-    if (q)         { conditions.push(`to_tsvector('english', l.name || ' ' || l.series) @@ plainto_tsquery('english', $${i++})`); values.push(q); }
+    if (series)   { conditions.push(`l.series = $${i++}`);    values.push(series); }
+    if (rarity)   { conditions.push(`l.rarity = $${i++}`);    values.push(rarity); }
+    if (condition){ conditions.push(`l.condition = $${i++}`); values.push(condition); }
+    if (minPrice) { conditions.push(`l.price >= $${i++}`);    values.push(Number(minPrice)); }
+    if (maxPrice) { conditions.push(`l.price <= $${i++}`);    values.push(Number(maxPrice)); }
+    if (q)        { conditions.push(`to_tsvector('english', l.name || ' ' || l.series) @@ plainto_tsquery('english', $${i++})`); values.push(q); }
+    if (featured === 'true') { conditions.push(`l.featured = true`); }
 
     const where   = conditions.join(' AND ');
-    const orderBy = sort === 'price_asc' ? 'l.price ASC' : sort === 'price_desc' ? 'l.price DESC' : sort === 'rarity' ? "CASE l.rarity WHEN 'Super Treasure Hunt' THEN 1 WHEN 'Treasure Hunt' THEN 2 WHEN 'Premium' THEN 3 WHEN 'Rare' THEN 4 ELSE 5 END" : 'l.created_at DESC';
-    const offset  = (Number(page) - 1) * Number(limit);
+    const orderBy = sort === 'price_asc' ? 'l.price ASC'
+      : sort === 'price_desc' ? 'l.price DESC'
+      : sort === 'rarity' ? "CASE l.rarity WHEN 'Super Treasure Hunt' THEN 1 WHEN 'Treasure Hunt' THEN 2 WHEN 'Premium' THEN 3 WHEN 'Rare' THEN 4 ELSE 5 END"
+      : 'l.created_at DESC';
+    const offset = (Number(page) - 1) * Number(limit);
 
     const [listRes, countRes] = await Promise.all([
       query(`SELECT l.*, u.name AS seller_name, u.avg_rating AS seller_rating, u.seller_badge
@@ -70,7 +69,6 @@ exports.getListing = async (req, res) => {
       [req.params.id]
     );
     if (!rows[0]) return notFound(res, 'Listing not found');
-    // Increment view count async (don't await)
     query('UPDATE listings SET views = views + 1 WHERE id = $1', [req.params.id]).catch(() => {});
     ok(res, { listing: rows[0] });
   } catch (e) { console.error(e); serverError(res); }
@@ -100,7 +98,7 @@ exports.updateListing = async (req, res) => {
     if (!existing[0]) return notFound(res, 'Listing not found');
     if (existing[0].seller_id !== req.user.id && req.user.role !== 'admin') return forbidden(res);
 
-    const fields = ['name','series','rarity','scale','condition','price','stock','description','year','status'];
+    const fields = ['name','series','rarity','scale','condition','price','stock','description','year','status','featured'];
     const updates = []; const values = [];
     let i = 1;
     fields.forEach(f => {
@@ -117,15 +115,40 @@ exports.updateListing = async (req, res) => {
   } catch (e) { console.error(e); serverError(res); }
 };
 
+// ── PATCH /admin/listings/:id/feature ─────────────────────────────────
+// Sets this listing as the featured one for its rarity (unfeatures others)
+exports.featureListing = async (req, res) => {
+  try {
+    const { rows: [listing] } = await query(
+      "SELECT * FROM listings WHERE id=$1 AND status='active' AND deleted_at IS NULL",
+      [req.params.id]
+    );
+    if (!listing) return notFound(res, 'Listing not found or not active');
+
+    // Unfeature all other listings of the same rarity
+    await query(
+      "UPDATE listings SET featured=false WHERE rarity=$1 AND id != $2",
+      [listing.rarity, req.params.id]
+    );
+    // Toggle featured on this one
+    const newFeatured = !listing.featured;
+    const { rows: [updated] } = await query(
+      "UPDATE listings SET featured=$1 WHERE id=$2 RETURNING *",
+      [newFeatured, req.params.id]
+    );
+    await invalidateListingCache();
+    ok(res, { listing: updated, featured: newFeatured });
+  } catch (e) { console.error(e); serverError(res); }
+};
+
 // ── DELETE /listings/:id ──────────────────────────────────────────────
 exports.deleteListing = async (req, res) => {
   try {
     const { rows } = await query('SELECT * FROM listings WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
     if (!rows[0]) return notFound(res, 'Listing not found');
-    if (rows[0].seller_id !== req.user.id && req.user.role !== 'admin') return forbidden(res);
+    if (rows[0].seller_id !== req.user.id && rows[0].seller_id !== req.user.id && req.user.role !== 'admin') return forbidden(res);
 
     await query("UPDATE listings SET status='deleted', deleted_at=now() WHERE id=$1", [req.params.id]);
-    // Delete images from Cloudinary async
     rows[0].images.forEach(url => {
       const pid = url.split('/').slice(-1)[0].split('.')[0];
       deleteImage(`hw-shop/listings/${rows[0].seller_id}/${pid}`).catch(() => {});
