@@ -20,7 +20,7 @@ app.use(cors({
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: { code:'RATE_LIMITED', message:'Too many requests' } } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: { error: { code:'RATE_LIMITED', message:'Too many requests' } } });
 const apiLimiter  = rateLimit({ windowMs: 60 * 1000,      max: 200 });
 app.use('/v1/auth', authLimiter);
 app.use('/v1',      apiLimiter);
